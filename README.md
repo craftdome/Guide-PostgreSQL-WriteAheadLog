@@ -2,7 +2,7 @@
 Демо: https://youtu.be/yNkXkKOghTU
 
 Для развёртывания стенда выбран дистрибутив linux `debian-10.10.0-amd64`.
-Для работы скрипта HA кластера на серверах БД должен быть установлен python версии 3.8 или новее.
+Для работы скрипта High Availability кластера на серверах должен быть установлен `python 3.8` или новее.
 
 Этапы
 1. Создание двух виртуальных машин (ВМ):
@@ -12,125 +12,91 @@
 
 | Сервер | IP-адрес | Маска | Шлюз |
 | --- | :---: | :---: | :---: |
-| pgsql-1  | 192.168.1.121 | 24 | 192.168.1.1 |
-| pgsql-2  | 192.168.1.122 | 24 | 192.168.1.1 |
+| **PGSQL-1**  | 192.168.1.121 | 24 | 192.168.1.1 |
+| **PGSQL-2**  | 192.168.1.122 | 24 | 192.168.1.1 |
 
-> Все настройки выполняются от пользователя root
+> Все настройки выполняются от пользователя `root`
 
 # Установка пакетов
-Пакеты сетевых инструментов и postgresql
+Пакеты сетевых инструментов и `postgresql`
 ```
 apt install net-tools postgresql
 ```
 
-# Настройка PGSQL-Primary
+# Настройка PGSQL-1
 1. Создание пользователя для репликации базы данных (БД) 
 ```
 su - postgres -с "createuser -U postgres repuser -P -c 5 --replication"
 ```
-2. Конфигурация в **pg_hba.conf**
+2. Конфигурация в `pg_hba.conf`
 ```
 host replication	repuser		192.168.1.122/32	trust
-host all		postgres	192.168.1.0/24		trust # Для тестирования подключения к БД из локальной сети
+# Для тестирования подключения к БД из локальной сети
+host all		postgres	192.168.1.0/24		trust
 ```
-3. Конфигурация в **postgresql.conf**
+3. Конфигурация в `postgresql.conf`
 ```
 listen_addresses = '*'
 default_transaction_read_only = off
 ```
 
-# Настройка PGSQL-Standby
-1. Конфигурация в **pg_hba.conf**
+# Настройка PGSQL-2
+1. Конфигурация в `pg_hba.conf`
 ```
 host replication	repuser		192.168.1.121/32	trust
-host all		postgres	192.168.1.0/24 		trust # Для тестирования подключения к БД из локальной сети
+# Для тестирования подключения к БД из локальной сети
+host all		postgres	192.168.1.0/24 		trust
 ```
-2. Конфигурация в **postgresql.conf**
+2. Конфигурация в `postgresql.conf`
 ```
 listen_addresses = '*'
 default_transaction_read_only = on
 ```
-3. Меняем название БД, для дальнейшей репликации с PGSQL-Primary
+3. Меняем название БД, для дальнейшей репликации с **PGSQL-1**
 ```
 mv /var/lib/postgresql/11/main/ /var/lib/postgresql/11/main_old/
 ```
-4. Остановка службы postgresql
+4. Остановка службы `postgresql`
 ```
 systemctl stop postgresql
 ```
-5. Репликация каталога main с PGSQL-Primary на PGSQL-Standby
+5. Репликация каталога `/var/lib/postgresql/11/main/` с **PGSQL-1** на **PGSQL-2**
 ```
-su - postgres -c "pg_basebackup -h 192.168.2.11 -D /var/lib/postgresql/11/main/ -U repuser -w --wal-method=stream"
+su - postgres -c "pg_basebackup -h 192.168.1.121 -D /var/lib/postgresql/11/main/ -U repuser -w --wal-method=stream"
 ```
-6. Запуск службы postgresql
+6. Запуск службы `postgresql`
 ```
 systemctl start postgresql
 ```
 
 # Написание скриптов
-1. Скрипт wal.py выполняет проверку работы серверов БД в кластере и ставится на оба сервера кластера.
+1. Скрипт `wal.py` выполняет проверку работы серверов БД в кластере и ставится на оба сервера кластера
+https://github.com/Tyz3/PostgreSQL-WriteAheadLog/blob/dca871a16c56a00c9f584d95709cd9e8ad18fe01/wal.py#L1-L226
 
-# Расписание запуска скриптов в crontab (PGSQL-Primary)
-1. Копирование файла wal.py в /usr/local/bin/wal.py для простоты активации скрипта через команду `python3.9 wal.py`
-```
-cp /root/wal.py /usr/local/bin/wal.py
-```
+> В задачу скрипта входит обнаружение отсутствия связи с Primary нодой и повышением себя до Primary, а также репликация данных с Primary ноды на  StandBy.
+
+> Скрипт самостоятельно определяет статус локальной БД и "реплики", также решает конфликты, когда оба сервера могут могут стать StandBy или Primary одновременно.
+
+> Процесс репликации, повышения/понижения и решения конфликтов отображается в лог-файле `/var/log/wal.log`
+# Расписание запуска скрипта в crontab (PGSQL-1)
+1. Расположение файла `wal.py` в `/root` с командой запуска `python3.9 /root/wal.py <sleep_before_work> <replica_ip>`
 2. Добавление задачи в планировщик через команду `crontab -e` (_запуск каждую минуту с задержкой 0 секунд и проверкой IP 192.168.1.122_)
 ```
-* * * * * root python3.9 /usr/local/bin/wal.py 0 192.168.1.122
+* * * * *	root	python3.9 /root/wal.py 0 192.168.1.122
 ```
 
-# Расписание запуска скриптов в crontab (PGSQL-Standby)
-1. Копирование файла wal.py в /usr/local/bin/wal.py для простоты активации скрипта через команду `python3.9 wal.py`
-```
-cp /root/wal.py /usr/local/bin/wal.py
-```
+# Расписание запуска скрипта в crontab (PGSQL-2)
+1. Расположение файла `wal.py` в `/root` с командой запуска `python3.9 /root/wal.py <sleep_before_work> <replica_ip>`
 2. Добавление задачи в планировщик через команду `crontab -e` (_запуск каждую минуту с задержкой 10 секунд и проверкой IP 192.168.1.121_)
 ```
-* * * * * root python3.9 /usr/local/bin/wal.py 10 192.168.1.121
+* * * * *	root	python3.9 /root/wal.py 10 192.168.1.121
 ```
-# Скрипт для проверки подключения (Python 3.8)
-1. Для работы скрипта необходимо установить пароль на пользователя postgres
+
+# Скрипт для моделирования внешнего подключения к кластеру (Python 3.8)
+1. Для работы скрипта необходимо установить пароль для пользователя `postgres`
 ```
 su - postgres && psql
 ALTER USER postgres WITH PASSWORD 'toor';
 ```
-2. Скрипт **main.py**
-```python
-import time
-from datetime import datetime
-import psycopg2
-
-
-def main():
-    sql = "SELECT * FROM guestbook;"
-
-    i = 0
-    while True:
-        try:
-            client = psycopg2.connect(
-                dbname='postgres',
-                user='postgres',
-                password='toor',
-                host='192.168.1.124',
-                port=5432,
-                connect_timeout=5
-            )
-            cursor = client.cursor()
-            cursor.execute(sql)
-            data: list = cursor.fetchall()
-            cursor.close()
-
-            print("%02d %s %s" % (i, datetime.now(), data))
-        except Exception as _e:
-            print("%02d %s %s" % (i, datetime.now(), "База данных недоступна"))
-
-        i += 1
-        time.sleep(1)
-
-
-if __name__ == '__main__':
-    main()
-
-```
-3. Запуск скрипта `python main.py`
+2. Скрипт `main.py`
+https://github.com/Tyz3/PostgreSQL-WriteAheadLog/blob/dca871a16c56a00c9f584d95709cd9e8ad18fe01/main.py#L1-L33
