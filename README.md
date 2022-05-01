@@ -100,3 +100,21 @@ ALTER USER postgres WITH PASSWORD 'toor';
 ```
 2. Скрипт `main.py`
 https://github.com/Tyz3/PostgreSQL-WriteAheadLog/blob/dca871a16c56a00c9f584d95709cd9e8ad18fe01/main.py#L1-L33
+
+
+# Нагрузочное тенстироваание отказоустойчивого кластера PostreSQL
+1. Для осуществления нагрузочного тестирования написан скрипт на Python `tests.py`
+https://github.com/Tyz3/PostgreSQL-WriteAheadLog/blob/33162da855d84b3f690138c4fa29898a01723257/tests.py#L1-L51
+2. Нагрузочное тестирование состоит из нескольких этапов:
+> Отправка SQL-запросов `INSERT` Primary серверу отказоустойчивого кластера PostgreSQL;
+
+> Отключение питания Primary серверу кластера PostgreSQL во время отправки SQL-запросов;
+
+> Смена роли StandBy сервера кластера PostgreSQL на Primary;
+
+> Отправка SQL-запросов новому Primary серверу кластера PostgreSQL;
+
+> Отключение нового Primary сервера и включение старого сервера кластера PostgreSQL во время отправки SQL-запросов;
+
+> Приём оставшихся SQL-запросов на старый Primary сервер кластера PostgreSQL.
+
