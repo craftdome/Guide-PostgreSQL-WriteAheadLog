@@ -1,120 +1,105 @@
 # Подготовка
-Демо: https://youtu.be/yNkXkKOghTU
+Демо: https://youtu.be/QqwcjC2qty0
 
 Для развёртывания стенда выбран дистрибутив linux `debian-10.10.0-amd64`.
-Для работы скрипта High Availability кластера на серверах должен быть установлен `python 3.8` или новее.
+Для работы скрипта High Availability кластера на серверах должен быть установлен `python 3.10` или новее.
 
 Этапы
 1. Создание двух виртуальных машин (ВМ):
-	* **pgsql-1** 
-	* **pgsql-2**
+    * **pgsql-1** 
+    * **pgsql-2**
+    * **Арбитр**
 2. Начальная сетевая конфигурация ВМ
 
-| Сервер | IP-адрес | Маска | Шлюз |
-| --- | :---: | :---: | :---: |
-| **PGSQL-1**  | 192.168.1.121 | 24 | 192.168.1.1 |
-| **PGSQL-2**  | 192.168.1.122 | 24 | 192.168.1.1 |
+| Сервер             |   IP-адрес    | Маска | Шлюз |
+|--------------------|:-------------:| :---: | :---: |
+| **PGSQL-1** (ВМ)   | 192.168.1.177 | 24 | 192.168.1.1 |
+| **PGSQL-2** (ВМ)   | 192.168.1.98  | 24 | 192.168.1.1 |
+| **Arbiter** (хост) | 192.168.1.133 | 24 | 192.168.1.1 |
 
-> Все настройки выполняются от пользователя `root`
+> Все настройки выполняются от пользователя `user`
 
-# Установка пакетов
-Пакеты сетевых инструментов и `postgresql`
-```
-apt install net-tools postgresql
+# Установка PostgreSQL 14
+Выполняется для всех ВМ.
+```shell
+sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
+apt update && apt -y install postgresql-14
 ```
 
-# Настройка PGSQL-1
-1. Создание пользователя для репликации базы данных (БД) 
+# Основная настройка Primary
+1. Создаём пустой кластер.
+```shell
+./initdb ~/db
 ```
-su - postgres -с "createuser -U postgres repuser -P -c 5 --replication"
-```
-2. Конфигурация в `pg_hba.conf`
-```
-host replication	repuser		192.168.1.122/32	trust
-# Для тестирования подключения к БД из локальной сети
-host all		postgres	192.168.1.0/24		trust
-```
-3. Конфигурация в `postgresql.conf`
-```
+2. Настройка `~/db/postgresql.conf`. Для сокета нужно создать соответствующую директорию `mkdir ~/socket`.
+```editorconfig
 listen_addresses = '*'
-default_transaction_read_only = off
+port = 5432
+# Меняем расположение сокет-файла, чтобы БД запускалась от лица user
+unix_socket_directories = '/home/user/socket'
+```
+3. Настройка `~/db/pg_hba.conf`. Добавляем в конец следующие строки.
+```
+host    all             kronos          192.168.1.0/24          trust
+host    replication     repuser         192.168.1.0/24          trust
+```
+4. Запуск кластера `~/db`.
+```shell
+./pg_ctl -D ~/db start
+```
+5. Создаём пользователя для подключения и работы с БД `kronos` (`-s` права суперпользователя) и для репликации `repuser` (`-c 10` максимальное кол-во подключений).
+```shell
+./createuser kronos -P -s
+./createuser -U kronos -P -c 10 --replication repuser
+```
+6. Создаём базу данных с названием `testdb`.
+```shell
+./createdb --owner=kronos testdb
+```
+7. Выдаём все права на БД `testdb` пользователю `kronos` (нужно сделать, есть это не суперпользователь).
+```shell
+./psql -h 192.168.1.177 --dbname=testdb -c "grant all privileges on database testdb to kronos;"
+```
+# Дополнительные настройки Primary
+```shell
+./psql --dbname=testdb -c "ALTER SYSTEM SET synchronous_standby_names to '*'"
+./psql --dbname=testdb -c "SELECT pg_reload_conf();"
+./psql --dbname=testdb -c "SET synchronous_commit to on;"
+```
+# Основная настройка StandBy
+```shell
+./pg_basebackup -h 192.168.1.177 -U repuser --create-slot --slot=rep98 --write-recovery-conf -D ~/db
 ```
 
-# Настройка PGSQL-2
-1. Конфигурация в `pg_hba.conf`
-```
-host replication	repuser		192.168.1.121/32	trust
-# Для тестирования подключения к БД из локальной сети
-host all		postgres	192.168.1.0/24 		trust
-```
-2. Конфигурация в `postgresql.conf`
-```
-listen_addresses = '*'
-default_transaction_read_only = on
-```
-3. Меняем название БД, для дальнейшей репликации с **PGSQL-1**
-```
-mv /var/lib/postgresql/11/main/ /var/lib/postgresql/11/main_old/
-```
-4. Остановка службы `postgresql`
-```
-systemctl stop postgresql
-```
-5. Репликация каталога `/var/lib/postgresql/11/main/` с **PGSQL-1** на **PGSQL-2**
-```
-su - postgres -c "pg_basebackup -h 192.168.1.121 -D /var/lib/postgresql/11/main/ -U repuser -w --wal-method=stream"
-```
-6. Запуск службы `postgresql`
-```
-systemctl start postgresql
-```
 
 # Написание скриптов
-1. Скрипт `wal.py` выполняет проверку работы серверов БД в кластере и ставится на оба сервера кластера
-https://github.com/Tyz3/PostgreSQL-WriteAheadLog/blob/dca871a16c56a00c9f584d95709cd9e8ad18fe01/wal.py#L1-L226
+Скрипт `node.py` выполняет проверку работы серверов БД в кластере и ставится на все сервера в кластере.
 
-> В задачу скрипта входит обнаружение отсутствия связи с Primary нодой и повышением себя до Primary, а также репликация данных с Primary ноды на  StandBy.
+**ссылка**
 
-> Скрипт самостоятельно определяет статус локальной БД и "реплики", также решает конфликты, когда оба сервера могут могут стать StandBy или Primary одновременно.
+Настройки скрипта лежат в файле `node_settings.py` с говорящими названиями.
 
-> Процесс репликации, повышения/понижения и решения конфликтов отображается в лог-файле `/var/log/wal.log`
-# Расписание запуска скрипта в crontab (PGSQL-1)
-1. Расположение файла `wal.py` в `/root` с командой запуска `python3.9 /root/wal.py <sleep_before_work> <replica_ip>`
-2. Добавление задачи в планировщик через команду `crontab -e` (_запуск каждую минуту с задержкой 0 секунд и проверкой IP 192.168.1.122_)
+**ссылка**
+
+> Файлы проекта: node.py, node_settings.py, logger.py
+
+Скрипт `arbiter.py` выполняет роль наблюдателя, все "ноды" запрашивают актуальную информацию по состоянию кластера, получив ответ - принимают решение по дальнейшему режиму работы.
+
+**ссылка**
+
+Настройки скрипта лежат в файле `arbiter_settings.py` с говорящими названиями.
+
+**ссылка**
+
+> Файлы проекта: arbiter.py, arbiter_settings.py
+
+# Автозапуск скриптов через crontab
+Рассмотрим пример с `node.py`. Закидываем файл `node.py` в `~/node` и добавляем задачу в планировщик через команду `crontab -e` (_запуск команды при старте системы_).
 ```
-* * * * *	root	python3.9 /root/wal.py 0 192.168.1.122
+@reboot		user	python /home/user/node.py
 ```
+Другие скрипты запускать аналогично. Либо вручную `python /home/user/node.py`.
 
-# Расписание запуска скрипта в crontab (PGSQL-2)
-1. Расположение файла `wal.py` в `/root` с командой запуска `python3.9 /root/wal.py <sleep_before_work> <replica_ip>`
-2. Добавление задачи в планировщик через команду `crontab -e` (_запуск каждую минуту с задержкой 10 секунд и проверкой IP 192.168.1.121_)
-```
-* * * * *	root	python3.9 /root/wal.py 10 192.168.1.121
-```
-
-# Скрипт для моделирования внешнего подключения к кластеру (Python 3.8)
-1. Для работы скрипта необходимо установить пароль для пользователя `postgres`
-```
-su - postgres && psql
-ALTER USER postgres WITH PASSWORD 'toor';
-```
-2. Скрипт `main.py`
-https://github.com/Tyz3/PostgreSQL-WriteAheadLog/blob/dca871a16c56a00c9f584d95709cd9e8ad18fe01/main.py#L1-L33
-
-
-# Нагрузочное тестирование отказоустойчивого кластера PostreSQL
-1. Для осуществления нагрузочного тестирования написан скрипт на Python `tests.py`
-https://github.com/Tyz3/PostgreSQL-WriteAheadLog/blob/33162da855d84b3f690138c4fa29898a01723257/tests.py#L1-L51
-2. Нагрузочное тестирование состоит из нескольких этапов:
-> Отправка SQL-запросов `INSERT` Primary серверу отказоустойчивого кластера PostgreSQL;
-
-> Отключение питания Primary серверу кластера PostgreSQL во время отправки SQL-запросов;
-
-> Смена роли StandBy сервера кластера PostgreSQL на Primary;
-
-> Отправка SQL-запросов новому Primary серверу кластера PostgreSQL;
-
-> Отключение нового Primary сервера и включение старого сервера кластера PostgreSQL во время отправки SQL-запросов;
-
-> Приём оставшихся SQL-запросов на старый Primary сервер кластера PostgreSQL.
-
+# Скрипт для моделирования внешнего подключения к кластеру
+**ссылка**
