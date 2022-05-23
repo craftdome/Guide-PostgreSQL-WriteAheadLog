@@ -1,10 +1,9 @@
 # Подготовка
 Демо: https://youtu.be/QqwcjC2qty0
 
-Для развёртывания стенда выбран дистрибутив linux `debian-10.10.0-amd64`.
+Для развёртывания стенда выбран дистрибутив linux `debian-11.3.0-amd64`.
 Для работы скрипта High Availability кластера на серверах должен быть установлен `python 3.10` или новее.
 
-Этапы
 1. Создание двух виртуальных машин (ВМ):
     * **pgsql-1** 
     * **pgsql-2**
@@ -68,29 +67,29 @@ host    replication     repuser         192.168.1.0/24          trust
 ./psql --dbname=testdb -c "SET synchronous_commit to on;"
 ```
 # Основная настройка StandBy
+Если 192.168.1.177 будет Primary:
 ```shell
 ./pg_basebackup -h 192.168.1.177 -U repuser --create-slot --slot=rep98 --write-recovery-conf -D ~/db
 ```
+Если 192.168.1.98 будет Primary:
+```shell
+./pg_basebackup -h 192.168.1.98 -U repuser --create-slot --slot=rep177 --write-recovery-conf -D ~/db
+```
 
-
-# Написание скриптов
+# Скрипты
 Скрипт `node.py` выполняет проверку работы серверов БД в кластере и ставится на все сервера в кластере.
+https://github.com/Tyz3/PostgreSQL-WriteAheadLog/blob/f716822cf96d0cd537c630e20205efd8b10edc21/node.py#L1-L275
 
-**ссылка**
-
-Настройки скрипта лежат в файле `node_settings.py` с говорящими названиями.
-
-**ссылка**
+Настройки скрипта лежат в файле `node_settings.py` с говорящими названиями (`host` и `slot_name` заменить для каждой БД).
+https://github.com/Tyz3/PostgreSQL-WriteAheadLog/blob/f716822cf96d0cd537c630e20205efd8b10edc21/node_settings.py#L1-L12
 
 > Файлы проекта: node.py, node_settings.py, logger.py
 
 Скрипт `arbiter.py` выполняет роль наблюдателя, все "ноды" запрашивают актуальную информацию по состоянию кластера, получив ответ - принимают решение по дальнейшему режиму работы.
-
-**ссылка**
+https://github.com/Tyz3/PostgreSQL-WriteAheadLog/blob/f716822cf96d0cd537c630e20205efd8b10edc21/arbiter.py#L1-L146
 
 Настройки скрипта лежат в файле `arbiter_settings.py` с говорящими названиями.
-
-**ссылка**
+https://github.com/Tyz3/PostgreSQL-WriteAheadLog/blob/f716822cf96d0cd537c630e20205efd8b10edc21/arbiter_settings.py#L1-L22
 
 > Файлы проекта: arbiter.py, arbiter_settings.py
 
@@ -102,4 +101,4 @@ host    replication     repuser         192.168.1.0/24          trust
 Другие скрипты запускать аналогично. Либо вручную `python /home/user/node.py`.
 
 # Скрипт для моделирования внешнего подключения к кластеру
-**ссылка**
+https://github.com/Tyz3/PostgreSQL-WriteAheadLog/blob/f716822cf96d0cd537c630e20205efd8b10edc21/tests.py#L1-L85
