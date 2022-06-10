@@ -21,7 +21,7 @@
 # Установка PostgreSQL 14 (из исходников)
 Выполняем следующие команды для всех ВМ.
 ```shell
-sudo apt install gnupg2 git gcc make flex bison libreadline-dev zlib1g-dev
+sudo apt install gnupg2 git gcc make flex bison libreadline-dev zlib1g-dev libpq-dev
 git clone https://github.com/postgres/postgres.git && cd postgres/
 git checkout REL_14_STABLE  # переключаемся на ветку с 14 версией
 ./configure --prefix=$HOME/project  # выполняем конфигурацию с указанием пути установки бинарников
