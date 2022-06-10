@@ -18,13 +18,18 @@
 
 > Все настройки выполняются от пользователя `user`
 
-# Установка PostgreSQL 14
-Выполняется для всех ВМ.
+# Установка PostgreSQL 14 (из исходников)
+Выполняем следующие команды для всех ВМ.
 ```shell
-sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-apt update && apt -y install postgresql-14
+sudo apt install gnupg2 git gcc make flex bison libreadline-dev zlib1g-dev
+git clone https://github.com/postgres/postgres.git && cd postgres/
+git checkout REL_14_STABLE  # переключаемся на ветку с 14 версией
+./configure --prefix=$HOME/project  # выполняем конфигурацию с указанием пути установки бинарников
+time make -j8 -s  # компиляция в тихом режиме
+make install  # установка бинарников
 ```
+
+Теперь все исполняемые файлы лежат в директории `$HOME/project/bin`. Выполняем `cd $HOME/project/bin` и переходим к настройке Primary.
 
 # Основная настройка Primary
 1. Создаём пустой кластер.
