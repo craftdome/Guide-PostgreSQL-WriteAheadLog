@@ -18,18 +18,18 @@ cd /usr/lib/postgresql/14/bin
 `./psql --port=5432 postgres`	подсоединиться к кластеру
 
 ## Предварительные настройки Primary
-`./initdb ~/db
-./pg_ctl -D ~/db start`
+```./initdb ~/db
+./pg_ctl -D ~/db start```
 
 # Создаём юзеров
-`./createuser kronos -P -s
-./createuser -U kronos -P -c 10 --replication repuser`
+```./createuser kronos -P -s
+./createuser -U kronos -P -c 10 --replication repuser```
 
 # Создаём БД
-`./createdb --owner=kronos testdb`
+```./createdb --owner=kronos testdb```
 
 # Выдаём права на БД для юзера
-`./psql --dbname=testdb -c "grant all privileges on database testdb to kronos;"`
+```./psql --dbname=testdb -c "grant all privileges on database testdb to kronos;"```
 
 # Primary - Включаем синхронную репликацию
 ```
@@ -39,10 +39,10 @@ cd /usr/lib/postgresql/14/bin
 ```
 
 # Standby - Создаём слот репликации БД с Primary
-`./pg_basebackup -h 192.168.1.177 -U repuser --create-slot --slot=rep98 --write-recovery-conf -D ~/db`
+```./pg_basebackup -h 192.168.1.177 -U repuser --create-slot --slot=rep98 --write-recovery-conf -D ~/db```
 
 # Проверка режима работы
-`./psql testdb -c "SELECT pg_is_in_recovery();"`
+```./psql testdb -c "SELECT pg_is_in_recovery();"```
 
 # Повышение Standby до Primary
-`./pg_ctl -D ~/db promote`
+```./pg_ctl -D ~/db promote```
