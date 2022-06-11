@@ -36,12 +36,10 @@ make install  # установка бинарников
 ```shell
 ./initdb ~/db
 ```
-2. Настройка `~/db/postgresql.conf`. Для сокета нужно создать соответствующую директорию `mkdir ~/socket`.
+2. Настройка `~/db/postgresql.conf`. Сокет для подключения к БД находится в директории `/tmp` (по умолчанию).
 ```editorconfig
 listen_addresses = '*'
 port = 5432
-# Меняем расположение сокет-файла, чтобы БД запускалась от лица user
-unix_socket_directories = '/home/user/socket'
 ```
 3. Настройка `~/db/pg_hba.conf`. Добавляем в конец следующие строки.
 ```
@@ -54,22 +52,18 @@ host    replication     repuser         192.168.1.0/24          trust
 ```
 5. Создаём пользователя для подключения и работы с БД `kronos` (`-s` права суперпользователя) и для репликации `repuser` (`-c 10` максимальное кол-во подключений).
 ```shell
-./createuser kronos -P -s
-./createuser -U kronos -P -c 10 --replication repuser
+./createuser -P -s -h /tmp kronos
+./createuser -U kronos -P -c 10 --replication -h /tmp repuser
 ```
 6. Создаём базу данных с названием `testdb`.
 ```shell
-./createdb --owner=kronos testdb
-```
-7. Выдаём все права на БД `testdb` пользователю `kronos` (нужно сделать, есть это не суперпользователь).
-```shell
-./psql -h 192.168.1.177 --dbname=testdb -c "grant all privileges on database testdb to kronos;"
+./createdb --owner=kronos -h /tmp testdb
 ```
 # Дополнительные настройки Primary
 ```shell
-./psql --dbname=testdb -c "ALTER SYSTEM SET synchronous_standby_names to '*'"
-./psql --dbname=testdb -c "SELECT pg_reload_conf();"
-./psql --dbname=testdb -c "SET synchronous_commit to on;"
+./psql -h /tmp --dbname=testdb -c "ALTER SYSTEM SET synchronous_standby_names to '*'"
+./psql -h /tmp --dbname=testdb -c "SELECT pg_reload_conf();"
+./psql -h /tmp --dbname=testdb -c "SET synchronous_commit to on;"
 ```
 # Основная настройка StandBy
 Если 192.168.1.177 будет Primary:
